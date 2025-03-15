@@ -159,11 +159,10 @@ class Peer:
             mensagem = f"{self.ip}:{self.porta} {self.relogio} GET_PEERS"
 
             bloqueio.clear()
-            if (self.__manda_mensagem(vizinho.ip, vizinho.porta, mensagem)):
-                self.__atualiza_status(vizinho, "ONLINE")
-            else:
+            if (not self.__manda_mensagem(vizinho.ip, vizinho.porta, mensagem)):
                 self.__atualiza_status(vizinho, "OFFLINE")
             bloqueio.wait()
+
         print()
 
     def lista_arquivos_locais(self):

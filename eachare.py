@@ -1,5 +1,3 @@
-# Formato da mensagem: <ORIGEM> <CLOCK> <TIPO>[ ARGUMENTO1 ARGUMENTO2...]\n
-
 import sys
 from classes import Peer
 import threading
