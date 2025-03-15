@@ -159,7 +159,10 @@ class Peer:
             mensagem = f"{self.ip}:{self.porta} {self.relogio} GET_PEERS"
 
             bloqueio.clear()
-            self.__manda_mensagem(vizinho.ip, vizinho.porta, mensagem)
+            if (self.__manda_mensagem(vizinho.ip, vizinho.porta, mensagem)):
+                self.__atualiza_status(vizinho, "ONLINE")
+            else:
+                self.__atualiza_status(vizinho, "OFFLINE")
             bloqueio.wait()
         print()
 
