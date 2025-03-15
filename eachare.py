@@ -27,6 +27,7 @@ while True:
         [6] Alterar tamanho de chunk
         [9] Sair
 > '''))
+    print()
 
     match comando:
         case 1:
