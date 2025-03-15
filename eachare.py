@@ -34,6 +34,8 @@ while True:
             peer.lista_peers()
         case 2:
             peer.obter_peers()
+        case 3:
+            peer.lista_arquivos_locais()
         case 9:
             peer.sair()
             break

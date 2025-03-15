@@ -1,6 +1,6 @@
 import socket
-from typing import Tuple
 import threading
+import os
 
 bloqueio = threading.Event()
 
@@ -161,6 +161,17 @@ class Peer:
             bloqueio.clear()
             self.__manda_mensagem(vizinho.ip, vizinho.porta, mensagem)
             bloqueio.wait()
+        print()
+
+    def lista_arquivos_locais(self):
+        arquivos = []
+        for f in os.scandir(self.diretorio_compartilhado):
+            if f.is_file():
+                arquivos.append(f.name)
+
+        for arquivo in arquivos:
+            print(arquivo)
+
         print()
 
     def sair(self):
