@@ -39,17 +39,22 @@ class Peer:
     def __manda_mensagem(self, ip, porta, mensagem) -> bool:
         print(f'    Encaminhando mensagem "{mensagem}" para {ip}:{porta}')
 
+        self.relogio += 1
+        print(f"    => Atualizando relogio para {self.relogio}")
+
         socket_cliente = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
         try:
             socket_cliente.connect((ip, porta))
+            print(ip, porta)
 
             socket_cliente.sendall(mensagem.encode())
 
             socket_cliente.close()
 
             return True
-        except:
+        except OSError as e:
+            print(e)
             return False
 
     def inicia_servidor(self):
@@ -108,15 +113,15 @@ class Peer:
                     print(f"    Atualizando peer {ip}:{porta} status {vizinho.status}")
                     for _ in range(int(numero_vizinhos)):
                         ip_vizinho, porta_vizinho, status_vizinho, _ = mensagens.pop().split(":")
+                        porta_vizinho = int(porta_vizinho)
 
                         vizinho_do_vizinho = self.__encontra_vizinho(ip_vizinho, porta_vizinho)
                         if vizinho_do_vizinho:
                             vizinho_do_vizinho.status = status_vizinho
                             print(f"    Atualizando peer {ip_vizinho}:{porta_vizinho} status {vizinho_do_vizinho.status}")
-                            continue
-
-                        print(f"    Adicionando novo peer {ip_vizinho}:{porta_vizinho} status {status_vizinho}")
-                        self.vizinhos.append(Vizinho(ip_vizinho, porta_vizinho, status_vizinho))
+                        else:
+                            print(f"    Adicionando novo peer {ip_vizinho}:{porta_vizinho} status {status_vizinho}")
+                            self.vizinhos.append(Vizinho(ip_vizinho, porta_vizinho, status_vizinho))
                 case "BYE":
                     vizinho.status = "OFFLINE"
                     print(f"    Atualizando peer {ip}:{porta} status {vizinho.status}")
@@ -127,6 +132,7 @@ class Peer:
     def lista_peers(self):
         print('''Lista de peers:
         [0] voltar para o menu anterior''')
+
         for i, vizinho in enumerate(self.vizinhos):
             print(f"        [{i + 1}] {vizinho.ip}:{vizinho.porta} {vizinho.status}")
         comando = int(input("> "))
@@ -139,12 +145,8 @@ class Peer:
             return
 
         vizinho = self.vizinhos[comando - 1]
-        self.relogio += 1
-        print(vizinho.ip, vizinho.porta)
 
         mensagem = f"{self.ip}:{self.porta} {self.relogio} HELLO"
-
-        print(f"    => Atualizando relogio para {self.relogio}")
 
         if (self.__manda_mensagem(vizinho.ip, vizinho.porta, mensagem)):
             vizinho.status = "ONLINE"
@@ -156,19 +158,12 @@ class Peer:
 
     def obter_peers(self):
         for vizinho in self.vizinhos:
-            self.relogio += 1
-            print(f"    => Atualizando relogio para {self.relogio}")
-
             mensagem = f"{self.ip}:{self.porta} {self.relogio} GET_PEERS"
 
             self.__manda_mensagem(vizinho.ip, vizinho.porta, mensagem)
 
     def sair(self):
         print("Saindo...")
-
-        self.relogio += 1
-
-        print(f"    => Atualizando relogio para {self.relogio}")
 
         for vizinho in self.vizinhos:
             if (vizinho.status == "OFFLINE"):
