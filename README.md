@@ -4,7 +4,7 @@
 python eachare.py <ip>:<porta> <lista_vizinhos> <diretorio_compartilhado>
 ```
 
-## Parametros
+## Parâmetros
 
 - ip - ip do socket TCP
 - porta - porta do socket TCP
