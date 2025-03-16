@@ -18,22 +18,29 @@ class Peer:
     ip: str
     porta: int
     vizinhos = []
-    diretorio_compartilhado: str
+    vizinhos_hash = {}
+    diretorio_compartilhado = []
     relogio: int
 
     def __init__(self, ip, porta, arquivo_vizinhos, diretorio_compartilhado):
         self.ip = ip
         self.porta = porta
-        self.diretorio_compartilhado = diretorio_compartilhado
         self.relogio = 0
 
         arquivo = open(arquivo_vizinhos)
 
         for vizinho in arquivo:
             ip_vizinho, porta_vizinho = vizinho.strip("\n").split(":")
+            porta_vizinho = int(porta_vizinho)
 
-            novo_vizinho = Vizinho(ip_vizinho, int(porta_vizinho), "OFFLINE")
+            novo_vizinho = Vizinho(ip_vizinho, porta_vizinho, "OFFLINE")
             self.vizinhos.append(novo_vizinho)
+            self.vizinhos_hash[ip_vizinho, porta_vizinho] = novo_vizinho
+        arquivo.close()
+
+        for f in os.scandir(diretorio_compartilhado):
+            if f.is_file():
+                self.diretorio_compartilhado.append(f.name)
 
     def __manda_mensagem(self, ip, porta, mensagem) -> bool:
         self.relogio += 1
@@ -59,13 +66,14 @@ class Peer:
         print(f"    Adicionando novo peer {ip}:{porta} status {status}")
         vizinho = Vizinho(ip, porta, status)
         self.vizinhos.append(vizinho)
+        self.vizinhos_hash[ip, porta] = vizinho
         return vizinho
 
     def __atualiza_ou_adiciona_vizinho(self, ip, porta, status):
-        for vizinho in self.vizinhos:
-            if vizinho.ip == ip and vizinho.porta == porta:
-                self.__atualiza_status(vizinho, status)
-                return
+        if (ip, porta) in self.vizinhos_hash:
+            vizinho = self.vizinhos_hash[ip, porta]
+            self.__atualiza_status(vizinho, status)
+            return
 
         vizinho = self.__adiciona_novo_vizinho(ip, porta, status)
 
@@ -88,8 +96,7 @@ class Peer:
         print(f"    => Atualizando relogio para {self.relogio}")
 
         match tipo_mensagem:
-            case "HELLO":
-                self.__atualiza_ou_adiciona_vizinho(ip, porta, "ONLINE")
+            case "HELLO": self.__atualiza_ou_adiciona_vizinho(ip, porta, "ONLINE")
             case "GET_PEERS":
                 self.__atualiza_ou_adiciona_vizinho(ip, porta, "ONLINE")
 
@@ -112,10 +119,8 @@ class Peer:
                     self.__atualiza_ou_adiciona_vizinho(ip_vizinho, porta_vizinho, status_vizinho)
 
                 bloqueio.set()
-            case "BYE":
-                self.__atualiza_ou_adiciona_vizinho(ip, porta, "OFFLINE")
-            case _:
-                print("Formato da mensagem errado")
+            case "BYE": self.__atualiza_ou_adiciona_vizinho(ip, porta, "OFFLINE")
+            case _: print("Formato da mensagem errado")
 
     def inicia_servidor(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as socket_servidor:
@@ -129,7 +134,7 @@ class Peer:
 
 
     def lista_peers(self):
-        print('''\nLista de peers:
+        print('''Lista de peers:
         [0] voltar para o menu anterior''')
 
         for i, vizinho in enumerate(self.vizinhos):
@@ -166,12 +171,7 @@ class Peer:
         print()
 
     def lista_arquivos_locais(self):
-        arquivos = []
-        for f in os.scandir(self.diretorio_compartilhado):
-            if f.is_file():
-                arquivos.append(f.name)
-
-        for arquivo in arquivos:
+        for arquivo in self.diretorio_compartilhado:
             print(arquivo)
 
         print()
