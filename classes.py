@@ -42,9 +42,11 @@ class Peer:
             if f.is_file():
                 self.diretorio_compartilhado.append(f.name)
 
-    def __manda_mensagem(self, ip, porta, mensagem) -> bool:
+    def __manda_mensagem(self, ip, porta, conteudo_mensagem) -> bool:
         self.relogio += 1
         print(f"    => Atualizando relogio para {self.relogio}")
+
+        mensagem = f"{self.ip}:{self.porta} {self.relogio} {conteudo_mensagem}"
 
         print(f'    Encaminhando mensagem "{mensagem}" para {ip}:{porta}')
 
@@ -100,7 +102,7 @@ class Peer:
             case "GET_PEERS":
                 self.__atualiza_ou_adiciona_vizinho(ip, porta, "ONLINE")
 
-                m = f"{self.ip}:{self.porta} {self.relogio} PEER_LIST {len(self.vizinhos) - 1}"
+                m = f"PEER_LIST {len(self.vizinhos) - 1}"
                 for vizinho in self.vizinhos:
                     if vizinho.ip == ip and vizinho.porta == porta:
                         continue
@@ -147,9 +149,7 @@ class Peer:
 
         vizinho = self.vizinhos[comando - 1]
 
-        mensagem = f"{self.ip}:{self.porta} {self.relogio} HELLO"
-
-        if (self.__manda_mensagem(vizinho.ip, vizinho.porta, mensagem)):
+        if (self.__manda_mensagem(vizinho.ip, vizinho.porta, "HELLO")):
             self.__atualiza_status(vizinho, "ONLINE")
         else:
             self.__atualiza_status(vizinho, "OFFLINE")
@@ -161,10 +161,8 @@ class Peer:
         for i in range(tamanho):
             vizinho = self.vizinhos[i]
 
-            mensagem = f"{self.ip}:{self.porta} {self.relogio} GET_PEERS"
-
             bloqueio.clear()
-            if (not self.__manda_mensagem(vizinho.ip, vizinho.porta, mensagem)):
+            if (not self.__manda_mensagem(vizinho.ip, vizinho.porta, "GET_PEERS")):
                 self.__atualiza_status(vizinho, "OFFLINE")
             bloqueio.wait()
 
@@ -183,6 +181,5 @@ class Peer:
             if (vizinho.status == "OFFLINE"):
                 continue
 
-            mensagem = f"{self.ip}:{self.porta} {self.relogio} BYE"
-            self.__manda_mensagem(vizinho.ip, vizinho.porta, mensagem)
+            self.__manda_mensagem(vizinho.ip, vizinho.porta, "BYE")
         print()
