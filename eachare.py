@@ -4,6 +4,10 @@ import threading
 
 args = sys.argv
 
+if len(args) < 4:
+    print("Não foram passados todos os argumentos")
+    exit(1)
+
 diretorio_compartilhado = args.pop()
 arquivo_vizinhos = args.pop()
 
