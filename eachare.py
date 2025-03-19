@@ -43,3 +43,5 @@ while True:
             break
         case _:
             print("Comando não conhecido\n")
+
+thread_servidor.join()

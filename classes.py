@@ -27,20 +27,23 @@ class Peer:
         self.porta = porta
         self.relogio = 0
 
-        arquivo = open(arquivo_vizinhos)
+        try:
+            arquivo = open(arquivo_vizinhos)
 
-        for vizinho in arquivo:
-            ip_vizinho, porta_vizinho = vizinho.strip("\n").split(":")
-            porta_vizinho = int(porta_vizinho)
+            for vizinho in arquivo:
+                ip_vizinho, porta_vizinho = vizinho.strip("\n").split(":")
+                porta_vizinho = int(porta_vizinho)
 
-            novo_vizinho = Vizinho(ip_vizinho, porta_vizinho, "OFFLINE")
-            self.vizinhos.append(novo_vizinho)
-            self.vizinhos_hash[ip_vizinho, porta_vizinho] = novo_vizinho
-        arquivo.close()
+                self.__adiciona_novo_vizinho(ip_vizinho, porta_vizinho, "OFFLINE")
+            print()
+            arquivo.close()
 
-        for f in os.scandir(diretorio_compartilhado):
-            if f.is_file():
-                self.diretorio_compartilhado.append(f.name)
+            for f in os.scandir(diretorio_compartilhado):
+                if f.is_file():
+                    self.diretorio_compartilhado.append(f.name)
+        except OSError as e:
+            print(e)
+            exit(1)
 
     def __manda_mensagem(self, ip, porta, conteudo_mensagem) -> bool:
         self.relogio += 1
@@ -65,7 +68,7 @@ class Peer:
         print(f"    Atualizando peer {peer.ip}:{peer.porta} status {peer.status}")
 
     def __adiciona_novo_vizinho(self, ip, porta, status) -> Vizinho:
-        print(f"    Adicionando novo peer {ip}:{porta} status {status}")
+        print(f"Adicionando novo peer {ip}:{porta} status {status}")
         vizinho = Vizinho(ip, porta, status)
         self.vizinhos.append(vizinho)
         self.vizinhos_hash[ip, porta] = vizinho
@@ -77,12 +80,14 @@ class Peer:
             self.__atualiza_status(vizinho, status)
             return
 
+        print("    ", end="")
         vizinho = self.__adiciona_novo_vizinho(ip, porta, status)
 
-    def __processa_mensagem(self, conexao):
+    def __processa_mensagem(self, conexao) -> bool:
         mensagem = conexao.recv(1024).decode()
-        if not mensagem:
-            return
+
+        if not mensagem: return False
+        if mensagem == "CLOSE": return True
 
         mensagens = mensagem.split(" ")
         ip, porta = mensagens[0].split(":")
@@ -123,17 +128,18 @@ class Peer:
                 bloqueio.set()
             case "BYE": self.__atualiza_ou_adiciona_vizinho(ip, porta, "OFFLINE")
             case _: print("Formato da mensagem errado")
+        return False
 
     def inicia_servidor(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as socket_servidor:
+            socket_servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             socket_servidor.bind((self.ip, self.porta))
             socket_servidor.listen(1)
             while True:
                 conexao, _ = socket_servidor.accept()
 
                 with conexao:
-                    self.__processa_mensagem(conexao)
-
+                    if (self.__processa_mensagem(conexao)): break
 
     def lista_peers(self):
         print('''Lista de peers:
@@ -182,4 +188,13 @@ class Peer:
                 continue
 
             self.__manda_mensagem(vizinho.ip, vizinho.porta, "BYE")
-        print()
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as socket_cliente:
+            while True:
+                try:
+                    socket_cliente.connect((self.ip, self.porta))
+
+                    socket_cliente.sendall("CLOSE".encode())
+                    break
+                except OSError as e:
+                    print(f"Não foi possível fechar o servidor {e}")
