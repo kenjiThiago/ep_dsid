@@ -141,16 +141,49 @@ class Peer:
                 with conexao:
                     if (self.__processa_mensagem(conexao)): break
 
+    def inicia_cliente(self):
+        while True:
+            comando = input('''Escolha um comando:
+        [1] Listar peers
+        [2] Obter peers
+        [3] Listar arquivos locais
+        [4] Buscar arquivos
+        [5] Exibir estatisticas
+        [6] Alterar tamanho de chunk
+        [9] Sair
+> ''')
+            print()
+
+            match comando:
+                case "1":
+                    self.lista_peers()
+                case "2":
+                    self.obter_peers()
+                case "3":
+                    self.lista_arquivos_locais()
+                case "9":
+                    self.sair()
+                    break
+                case _:
+                    print("Comando não conhecido\n")
+
     def lista_peers(self):
         print('''Lista de peers:
         [0] voltar para o menu anterior''')
 
         for i, vizinho in enumerate(self.vizinhos):
             print(f"        [{i + 1}] {vizinho.ip}:{vizinho.porta} {vizinho.status}")
-        comando = int(input("> "))
+        comando = input("> ")
         print()
 
-        if comando == 0 or comando > len(self.vizinhos):
+        tamanho = len(self.vizinhos)
+
+        if not comando.isdigit():
+            print(f"O input deve ser um número de 0 a {tamanho}\n")
+            return
+
+        comando = int(comando)
+        if comando == 0 or comando > tamanho:
             return
 
         vizinho = self.vizinhos[comando - 1]
