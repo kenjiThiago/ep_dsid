@@ -66,12 +66,11 @@ class Peer:
         peer.status = status
         print(f"    Atualizando peer {peer.ip}:{peer.porta} status {peer.status}")
 
-    def __adiciona_novo_vizinho(self, ip, porta, status) -> Vizinho:
+    def __adiciona_novo_vizinho(self, ip, porta, status):
         print(f"Adicionando novo peer {ip}:{porta} status {status}")
         vizinho = Vizinho(ip, porta, status)
         self.vizinhos.append(vizinho)
         self.vizinhos_hash[ip, porta] = vizinho
-        return vizinho
 
     def __atualiza_ou_adiciona_vizinho(self, ip, porta, status):
         if (ip, porta) in self.vizinhos_hash:
@@ -80,7 +79,7 @@ class Peer:
             return
 
         print("    ", end="")
-        vizinho = self.__adiciona_novo_vizinho(ip, porta, status)
+        self.__adiciona_novo_vizinho(ip, porta, status)
 
     def __processa_mensagem(self, conexao) -> bool:
         mensagem = conexao.recv(1024).decode()
