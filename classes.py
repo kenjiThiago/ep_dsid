@@ -2,8 +2,6 @@ import socket
 import threading
 import os
 
-bloqueio = threading.Event()
-
 class Vizinho:
     ip: str
     porta: int
@@ -21,6 +19,7 @@ class Peer:
     vizinhos_hash = {}
     diretorio_compartilhado = []
     relogio: int
+    bloqueio = threading.Event()
 
     def __init__(self, ip, porta, arquivo_vizinhos, diretorio_compartilhado):
         self.ip = ip
@@ -60,7 +59,7 @@ class Peer:
                 socket_cliente.sendall(mensagem.encode())
                 return True
             except:
-                bloqueio.set()
+                self.bloqueio.set()
                 return False
 
     def __atualiza_status(self, peer, status):
@@ -125,7 +124,7 @@ class Peer:
 
                     self.__atualiza_ou_adiciona_vizinho(ip_vizinho, porta_vizinho, status_vizinho)
 
-                bloqueio.set()
+                self.bloqueio.set()
             case "BYE": self.__atualiza_ou_adiciona_vizinho(ip, porta, "OFFLINE")
             case _: print("Formato da mensagem errado")
         return False
@@ -200,10 +199,10 @@ class Peer:
         for i in range(tamanho):
             vizinho = self.vizinhos[i]
 
-            bloqueio.clear()
+            self.bloqueio.clear()
             if (not self.__manda_mensagem(vizinho.ip, vizinho.porta, "GET_PEERS")):
                 self.__atualiza_status(vizinho, "OFFLINE")
-            bloqueio.wait()
+            self.bloqueio.wait()
 
         print()
 
