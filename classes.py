@@ -1,5 +1,5 @@
 import socket
-import threading
+from typing import List, Tuple
 import os
 
 class Vizinho:
@@ -19,7 +19,6 @@ class Peer:
     vizinhos_hash = {}
     diretorio_compartilhado = []
     relogio: int
-    bloqueio = threading.Event()
 
     def __init__(self, ip, porta, arquivo_vizinhos, diretorio_compartilhado):
         self.ip = ip
@@ -44,23 +43,9 @@ class Peer:
             print(e)
             exit(1)
 
-    def __manda_mensagem(self, ip, porta, conteudo_mensagem) -> bool:
+    def __atualiza_relogio(self):
         self.relogio += 1
         print(f"    => Atualizando relogio para {self.relogio}")
-
-        mensagem = f"{self.ip}:{self.porta} {self.relogio} {conteudo_mensagem}"
-
-        print(f'    Encaminhando mensagem "{mensagem}" para {ip}:{porta}')
-
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as socket_cliente:
-            try:
-                socket_cliente.connect((ip, porta))
-
-                socket_cliente.sendall(mensagem.encode())
-                return True
-            except:
-                self.bloqueio.set()
-                return False
 
     def __atualiza_status(self, peer, status):
         peer.status = status
@@ -81,50 +66,86 @@ class Peer:
         print("    ", end="")
         self.__adiciona_novo_vizinho(ip, porta, status)
 
+    def __processa_parametros(self, mensagem) -> Tuple[str, int, str, List]:
+        parametros = mensagem.split(" ")
+
+        ip, porta = parametros[0].split(":")
+        porta = int(porta)
+        tipo_mensagem = parametros[2]
+        args = parametros[3:]
+
+        return ip, porta, tipo_mensagem, args
+
+    def __manda_resposta(self, conexao, ip_destino, porta_destino, conteudo_mensagem):
+        self.__atualiza_relogio()
+
+        mensagem = f"{self.ip}:{self.porta} {self.relogio} {conteudo_mensagem}"
+
+        print(f'    Encaminhando mensagem "{mensagem}" para {ip_destino}:{porta_destino}')
+
+        conexao.sendall(mensagem.encode())
+
+    def processa_resposta(self, resposta):
+        ip_origem, porta_origem, tipo_mensagem, args = self.__processa_parametros(resposta)
+
+        print(f'    Resposta recebida: "{resposta}"')
+        self.__atualiza_relogio()
+
+        if tipo_mensagem == "PEER_LIST":
+            numero_vizinhos = args[0]
+
+            self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE")
+
+            for _ in range(int(numero_vizinhos)):
+                ip_vizinho, porta_vizinho, status_vizinho, _ = args.pop().split(":")
+                porta_vizinho = int(porta_vizinho)
+
+                self.__atualiza_ou_adiciona_vizinho(ip_vizinho, porta_vizinho, status_vizinho)
+
+    def __manda_mensagem(self, ip_destino, porta_destino, conteudo_mensagem) -> bool:
+        self.__atualiza_relogio()
+
+        mensagem = f"{self.ip}:{self.porta} {self.relogio} {conteudo_mensagem}"
+
+        print(f'    Encaminhando mensagem "{mensagem}" para {ip_destino}:{porta_destino}')
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as socket_cliente:
+            try:
+                socket_cliente.connect((ip_destino, porta_destino))
+
+                socket_cliente.sendall(mensagem.encode())
+
+                resposta = socket_cliente.recv(1024).decode()
+                if resposta: self.processa_resposta(resposta)
+
+                return True
+            except:
+                return False
+
     def __processa_mensagem(self, conexao) -> bool:
         mensagem = conexao.recv(1024).decode()
 
         if not mensagem: return False
         if mensagem == "CLOSE": return True
 
-        mensagens = mensagem.split(" ")
-        ip, porta = mensagens[0].split(":")
-        porta = int(porta)
-        tipo_mensagem = mensagens[2]
+        ip_origem, porta_origem, tipo_mensagem, _ = self.__processa_parametros(mensagem)
 
-        if tipo_mensagem == "PEER_LIST":
-            print(f'    Resposta recebida: "{mensagem}"')
-        else:
-            print(f'\n    Mensagem recebida: "{mensagem}"')
-
-        self.relogio += 1
-        print(f"    => Atualizando relogio para {self.relogio}")
+        print(f'\n    Mensagem recebida: "{mensagem}"')
+        self.__atualiza_relogio()
 
         match tipo_mensagem:
-            case "HELLO": self.__atualiza_ou_adiciona_vizinho(ip, porta, "ONLINE")
+            case "HELLO": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE")
             case "GET_PEERS":
-                self.__atualiza_ou_adiciona_vizinho(ip, porta, "ONLINE")
+                self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE")
 
                 m = f"PEER_LIST {len(self.vizinhos) - 1}"
                 for vizinho in self.vizinhos:
-                    if vizinho.ip == ip and vizinho.porta == porta:
+                    if vizinho.ip == ip_origem and vizinho.porta == porta_origem:
                         continue
                     m += f" {vizinho.ip}:{vizinho.porta}:{vizinho.status}:0"
 
-                self.__manda_mensagem(ip, porta, m)
-            case "PEER_LIST":
-                numero_vizinhos = mensagens[3]
-
-                self.__atualiza_ou_adiciona_vizinho(ip, porta, "ONLINE")
-
-                for _ in range(int(numero_vizinhos)):
-                    ip_vizinho, porta_vizinho, status_vizinho, _ = mensagens.pop().split(":")
-                    porta_vizinho = int(porta_vizinho)
-
-                    self.__atualiza_ou_adiciona_vizinho(ip_vizinho, porta_vizinho, status_vizinho)
-
-                self.bloqueio.set()
-            case "BYE": self.__atualiza_ou_adiciona_vizinho(ip, porta, "OFFLINE")
+                self.__manda_resposta(conexao, ip_origem, porta_origem, m)
+            case "BYE": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "OFFLINE")
             case _: print("Formato da mensagem errado")
         return False
 
@@ -198,10 +219,8 @@ class Peer:
         for i in range(tamanho):
             vizinho = self.vizinhos[i]
 
-            self.bloqueio.clear()
             if (not self.__manda_mensagem(vizinho.ip, vizinho.porta, "GET_PEERS")):
                 self.__atualiza_status(vizinho, "OFFLINE")
-            self.bloqueio.wait()
 
         print()
 
@@ -221,11 +240,9 @@ class Peer:
             self.__manda_mensagem(vizinho.ip, vizinho.porta, "BYE")
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as socket_cliente:
-            while True:
-                try:
-                    socket_cliente.connect((self.ip, self.porta))
+            try:
+                socket_cliente.connect((self.ip, self.porta))
 
-                    socket_cliente.sendall("CLOSE".encode())
-                    break
-                except OSError as e:
-                    print(f"Não foi possível fechar o servidor {e}")
+                socket_cliente.sendall("CLOSE".encode())
+            except OSError as e:
+                print(f"Não foi possível fechar o servidor {e}")
