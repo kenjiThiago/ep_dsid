@@ -85,7 +85,7 @@ class Peer:
 
         conexao.sendall(mensagem.encode())
 
-    def processa_resposta(self, resposta):
+    def __processa_resposta(self, resposta):
         ip_origem, porta_origem, tipo_mensagem, args = self.__processa_parametros(resposta)
 
         print(f'    Resposta recebida: "{resposta}"')
@@ -116,7 +116,7 @@ class Peer:
                 socket_cliente.sendall(mensagem.encode())
 
                 resposta = socket_cliente.recv(1024).decode()
-                if resposta: self.processa_resposta(resposta)
+                if resposta: self.__processa_resposta(resposta)
 
                 return True
             except:
@@ -159,32 +159,6 @@ class Peer:
 
                 with conexao:
                     if (self.__processa_mensagem(conexao)): break
-
-    def inicia_cliente(self):
-        while True:
-            comando = input('''Escolha um comando:
-        [1] Listar peers
-        [2] Obter peers
-        [3] Listar arquivos locais
-        [4] Buscar arquivos
-        [5] Exibir estatisticas
-        [6] Alterar tamanho de chunk
-        [9] Sair
-> ''')
-            print()
-
-            match comando:
-                case "1":
-                    self.lista_peers()
-                case "2":
-                    self.obter_peers()
-                case "3":
-                    self.lista_arquivos_locais()
-                case "9":
-                    self.sair()
-                    break
-                case _:
-                    print("Comando não conhecido\n")
 
     def lista_peers(self):
         print('''Lista de peers:
@@ -246,3 +220,29 @@ class Peer:
                 socket_cliente.sendall("CLOSE".encode())
             except OSError as e:
                 print(f"Não foi possível fechar o servidor {e}")
+
+    def inicia_cliente(self):
+        while True:
+            comando = input('''Escolha um comando:
+        [1] Listar peers
+        [2] Obter peers
+        [3] Listar arquivos locais
+        [4] Buscar arquivos
+        [5] Exibir estatisticas
+        [6] Alterar tamanho de chunk
+        [9] Sair
+> ''')
+            print()
+
+            match comando:
+                case "1":
+                    self.lista_peers()
+                case "2":
+                    self.obter_peers()
+                case "3":
+                    self.lista_arquivos_locais()
+                case "9":
+                    self.sair()
+                    break
+                case _:
+                    print("Comando não conhecido\n")
