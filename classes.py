@@ -139,13 +139,13 @@ class Peer:
             case "GET_PEERS":
                 self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE")
 
-                m = f"PEER_LIST {len(self.vizinhos) - 1}"
+                resposta = f"PEER_LIST {len(self.vizinhos) - 1}"
                 for vizinho in self.vizinhos:
                     if vizinho.ip == ip_origem and vizinho.porta == porta_origem:
                         continue
-                    m += f" {vizinho.ip}:{vizinho.porta}:{vizinho.status}:0"
+                    resposta += f" {vizinho.ip}:{vizinho.porta}:{vizinho.status}:0"
 
-                self.__manda_resposta(conexao, ip_origem, porta_origem, m)
+                self.__manda_resposta(conexao, ip_origem, porta_origem, resposta)
             case "BYE": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "OFFLINE")
             case _: print("Formato da mensagem errado")
         return False
