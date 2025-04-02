@@ -1,5 +1,5 @@
 import sys
-from classes import Peer
+from peer import Peer
 import threading
 
 args = sys.argv
