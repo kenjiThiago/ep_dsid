@@ -81,7 +81,7 @@ class Peer:
 
         mensagem = f"{self.ip}:{self.porta} {self.relogio} {conteudo_mensagem}"
 
-        print(f'    Encaminhando mensagem "{mensagem}" para {ip_destino}:{porta_destino}')
+        print(f'    Encaminhando resposta "{mensagem}" para {ip_destino}:{porta_destino}')
 
         conexao.sendall(mensagem.encode())
 
@@ -115,8 +115,9 @@ class Peer:
 
                 socket_cliente.sendall(mensagem.encode())
 
-                resposta = socket_cliente.recv(1024).decode()
-                if resposta: self.__processa_resposta(resposta)
+                if conteudo_mensagem == "GET_PEERS":
+                    resposta = socket_cliente.recv(1024).decode()
+                    if resposta: self.__processa_resposta(resposta)
 
                 return True
             except:
