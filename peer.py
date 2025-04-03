@@ -15,26 +15,28 @@ class Vizinho:
 class Peer:
     ip: str
     porta: int
-    vizinhos = []
-    vizinhos_hash = {}
-    diretorio_compartilhado = []
+    vizinhos: List[Vizinho]
+    vizinhos_hash: dict[Tuple[str, int], Vizinho]
+    diretorio_compartilhado: List[str]
     relogio: int
 
     def __init__(self, ip, porta, arquivo_vizinhos, diretorio_compartilhado):
         self.ip = ip
         self.porta = porta
         self.relogio = 0
+        self.vizinhos = []
+        self.vizinhos_hash = {}
+        self.diretorio_compartilhado = []
 
         try:
-            arquivo = open(arquivo_vizinhos)
+            with open(arquivo_vizinhos) as arquivo:
+                for vizinho in arquivo:
+                    ip_vizinho, porta_vizinho = vizinho.strip("\n").split(":")
+                    porta_vizinho = int(porta_vizinho)
 
-            for vizinho in arquivo:
-                ip_vizinho, porta_vizinho = vizinho.strip("\n").split(":")
-                porta_vizinho = int(porta_vizinho)
+                    self.__adiciona_novo_vizinho(ip_vizinho, porta_vizinho, "OFFLINE")
 
-                self.__adiciona_novo_vizinho(ip_vizinho, porta_vizinho, "OFFLINE")
             print()
-            arquivo.close()
 
             for f in os.scandir(diretorio_compartilhado):
                 if f.is_file():
@@ -121,6 +123,7 @@ class Peer:
 
                 return True
             except:
+                print(f"    [Erro] Falha na conexão")
                 return False
 
     def __processa_mensagem(self, conexao) -> bool:
@@ -220,7 +223,7 @@ class Peer:
 
                 socket_cliente.sendall("CLOSE".encode())
             except OSError as e:
-                print(f"Não foi possível fechar o servidor {e}")
+                print(f"[Erro] Falha ao fechar o servidor: {e}")
 
     def inicia_cliente(self):
         while True:
@@ -242,6 +245,12 @@ class Peer:
                     self.obter_peers()
                 case "3":
                     self.lista_arquivos_locais()
+                case "4":
+                    print("[TODO] Implementar busca de arquivos\n")
+                case "5":
+                    print("[TODO] Implementar exibição de estatísticas\n")
+                case "6":
+                    print("[TODO] Implementar alteração de tamanho de chunk\n")
                 case "9":
                     self.sair()
                     break
