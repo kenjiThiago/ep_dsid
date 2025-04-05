@@ -137,20 +137,20 @@ class Peer:
         print(f'\n    Mensagem recebida: "{mensagem}"')
         self.__atualiza_relogio()
 
-        match tipo_mensagem:
-            case "HELLO": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE")
-            case "GET_PEERS":
-                self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE")
+        if tipo_mensagem == "HELLO": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE")
+        elif tipo_mensagem == "GET_PEERS":
+            self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE")
 
-                resposta = f"PEER_LIST {len(self.vizinhos) - 1}"
-                for vizinho in self.vizinhos:
-                    if vizinho.ip == ip_origem and vizinho.porta == porta_origem:
-                        continue
-                    resposta += f" {vizinho.ip}:{vizinho.porta}:{vizinho.status}:0"
+            resposta = f"PEER_LIST {len(self.vizinhos) - 1}"
+            for vizinho in self.vizinhos:
+                if vizinho.ip == ip_origem and vizinho.porta == porta_origem:
+                    continue
+                resposta += f" {vizinho.ip}:{vizinho.porta}:{vizinho.status}:0"
 
-                self.__manda_resposta(conexao, ip_origem, porta_origem, resposta)
-            case "BYE": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "OFFLINE")
-            case _: print("Formato da mensagem errado")
+            self.__manda_resposta(conexao, ip_origem, porta_origem, resposta)
+        elif tipo_mensagem == "BYE": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "OFFLINE")
+        else: print("Formato da mensagem errado")
+
         return False
 
     def inicia_servidor(self):
@@ -238,21 +238,20 @@ class Peer:
 > ''')
             print()
 
-            match comando:
-                case "1":
-                    self.lista_peers()
-                case "2":
-                    self.obter_peers()
-                case "3":
-                    self.lista_arquivos_locais()
-                case "4":
-                    print("[TODO] Implementar busca de arquivos\n")
-                case "5":
-                    print("[TODO] Implementar exibição de estatísticas\n")
-                case "6":
-                    print("[TODO] Implementar alteração de tamanho de chunk\n")
-                case "9":
-                    self.sair()
-                    break
-                case _:
-                    print("Comando não conhecido\n")
+            if comando == "1":
+                self.lista_peers()
+            elif comando == "2":
+                self.obter_peers()
+            elif comando == "3":
+                self.lista_arquivos_locais()
+            elif comando == "4":
+                print("[TODO] Implementar busca de arquivos\n")
+            elif comando == "5":
+                print("[TODO] Implementar exibição de estatísticas\n")
+            elif comando == "6":
+                print("[TODO] Implementar alteração de tamanho de chunk\n")
+            elif comando == "9":
+                self.sair()
+                break
+            else:
+                print("Comando não conhecido\n")
