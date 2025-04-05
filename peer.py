@@ -105,11 +105,11 @@ class Peer:
                 self.__atualiza_ou_adiciona_vizinho(ip_vizinho, porta_vizinho, status_vizinho)
 
     def __manda_mensagem(self, ip_destino, porta_destino, conteudo_mensagem) -> bool:
-        self.__atualiza_relogio()
-
         mensagem = f"{self.ip}:{self.porta} {self.relogio} {conteudo_mensagem}"
 
-        print(f'    Encaminhando mensagem "{mensagem}" para {ip_destino}:{porta_destino}')
+        if conteudo_mensagem != "CLOSE":
+            self.__atualiza_relogio()
+            print(f'    Encaminhando mensagem "{mensagem}" para {ip_destino}:{porta_destino}')
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as socket_cliente:
             try:
@@ -130,9 +130,10 @@ class Peer:
         mensagem = conexao.recv(1024).decode()
 
         if not mensagem: return False
-        if mensagem == "CLOSE": return True
 
         ip_origem, porta_origem, tipo_mensagem, _ = self.__processa_parametros(mensagem)
+
+        if tipo_mensagem == "CLOSE": return True
 
         print(f'\n    Mensagem recebida: "{mensagem}"')
         self.__atualiza_relogio()
@@ -217,13 +218,8 @@ class Peer:
 
             self.__manda_mensagem(vizinho.ip, vizinho.porta, "BYE")
 
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as socket_cliente:
-            try:
-                socket_cliente.connect((self.ip, self.porta))
-
-                socket_cliente.sendall("CLOSE".encode())
-            except OSError as e:
-                print(f"[Erro] Falha ao fechar o servidor: {e}")
+        if (not self.__manda_mensagem(self.ip, self.porta, "CLOSE")):
+            print("[Erro] Falha ao fechar o servidor")
 
     def inicia_cliente(self):
         while True:
