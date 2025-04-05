@@ -105,11 +105,11 @@ class Peer:
                 self.__atualiza_ou_adiciona_vizinho(ip_vizinho, porta_vizinho, status_vizinho)
 
     def __manda_mensagem(self, ip_destino, porta_destino, conteudo_mensagem) -> bool:
+        if conteudo_mensagem != "CLOSE": self.__atualiza_relogio()
+
         mensagem = f"{self.ip}:{self.porta} {self.relogio} {conteudo_mensagem}"
 
-        if conteudo_mensagem != "CLOSE":
-            self.__atualiza_relogio()
-            print(f'    Encaminhando mensagem "{mensagem}" para {ip_destino}:{porta_destino}')
+        if conteudo_mensagem != "CLOSE": print(f'    Encaminhando mensagem "{mensagem}" para {ip_destino}:{porta_destino}')
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as socket_cliente:
             try:
