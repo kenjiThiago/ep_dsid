@@ -36,7 +36,7 @@ class Peer:
                     ip_vizinho, porta_vizinho = vizinho.strip("\n").split(":")
                     porta_vizinho = int(porta_vizinho)
 
-                    self.__adiciona_novo_vizinho(ip_vizinho, porta_vizinho, "OFFLINE")
+                    self.__adiciona_novo_vizinho(ip_vizinho, porta_vizinho, "OFFLINE", 0)
 
             print()
 
@@ -47,29 +47,39 @@ class Peer:
             print(e)
             exit(1)
 
+    def __printa_vizinhos(self):
+        for vizinho in self.vizinhos:
+            print(f"{vizinho.ip}:{vizinho.porta}", vizinho.status, vizinho.relogio)
+        print()
+
     def __atualiza_relogio(self, relogio_vizinho):
         self.relogio = max(self.relogio, relogio_vizinho)
         self.relogio += 1
         print(f"    => Atualizando relogio para {self.relogio}")
 
+    def __atualiza_relogio_vizinhos(self, ip, porta, relogio):
+        if (ip, porta) in self.vizinhos_hash:
+            vizinho = self.vizinhos_hash[ip, porta]
+            vizinho.relogio = max(vizinho.relogio, relogio)
+
     def __atualiza_status(self, peer, status):
         peer.status = status
         print(f"    Atualizando peer {peer.ip}:{peer.porta} status {peer.status}")
 
-    def __adiciona_novo_vizinho(self, ip, porta, status):
+    def __adiciona_novo_vizinho(self, ip, porta, status, relogio):
         print(f"Adicionando novo peer {ip}:{porta} status {status}")
-        vizinho = Vizinho(ip, porta, status, 0)
+        vizinho = Vizinho(ip, porta, status, relogio)
         self.vizinhos.append(vizinho)
         self.vizinhos_hash[ip, porta] = vizinho
 
-    def __atualiza_ou_adiciona_vizinho(self, ip, porta, status):
+    def __atualiza_ou_adiciona_vizinho(self, ip, porta, status, relogio):
         if (ip, porta) in self.vizinhos_hash:
             vizinho = self.vizinhos_hash[ip, porta]
             self.__atualiza_status(vizinho, status)
             return
 
         print("    ", end="")
-        self.__adiciona_novo_vizinho(ip, porta, status)
+        self.__adiciona_novo_vizinho(ip, porta, status, relogio)
 
     def __processa_parametros(self, mensagem) -> Tuple[str, int, int, str, List]:
         parametros = mensagem.split(" ")
@@ -96,17 +106,18 @@ class Peer:
 
         print(f'    Resposta recebida: "{resposta}"')
         self.__atualiza_relogio(relogio)
+        self.__atualiza_relogio_vizinhos(ip_origem, porta_origem, relogio)
 
         if tipo_mensagem == "PEER_LIST":
             numero_vizinhos = args[0]
 
-            self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE")
+            self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
 
             for _ in range(int(numero_vizinhos)):
-                ip_vizinho, porta_vizinho, status_vizinho, _ = args.pop().split(":")
+                ip_vizinho, porta_vizinho, status_vizinho, relogio = args.pop().split(":")
                 porta_vizinho = int(porta_vizinho)
 
-                self.__atualiza_ou_adiciona_vizinho(ip_vizinho, porta_vizinho, status_vizinho)
+                self.__atualiza_ou_adiciona_vizinho(ip_vizinho, porta_vizinho, status_vizinho, relogio)
 
     def __manda_mensagem(self, ip_destino, porta_destino, conteudo_mensagem) -> bool:
         if conteudo_mensagem != "CLOSE": self.__atualiza_relogio(0)
@@ -141,19 +152,20 @@ class Peer:
 
         print(f'\n    Mensagem recebida: "{mensagem}"')
         self.__atualiza_relogio(relogio)
+        self.__atualiza_relogio_vizinhos(ip_origem, porta_origem, relogio)
 
-        if tipo_mensagem == "HELLO": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE")
+        if tipo_mensagem == "HELLO": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
         elif tipo_mensagem == "GET_PEERS":
-            self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE")
+            self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
 
             resposta = f"PEER_LIST {len(self.vizinhos) - 1}"
             for vizinho in self.vizinhos:
                 if vizinho.ip == ip_origem and vizinho.porta == porta_origem:
                     continue
-                resposta += f" {vizinho.ip}:{vizinho.porta}:{vizinho.status}:0"
+                resposta += f" {vizinho.ip}:{vizinho.porta}:{vizinho.status}:{vizinho.relogio}"
 
             self.__manda_resposta(conexao, ip_origem, porta_origem, resposta)
-        elif tipo_mensagem == "BYE": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "OFFLINE")
+        elif tipo_mensagem == "BYE": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "OFFLINE", relogio)
         else: print("Formato da mensagem errado")
 
         return False
@@ -253,5 +265,7 @@ class Peer:
             elif comando == "9":
                 self.sair()
                 break
+            elif comando == "10":
+                self.__printa_vizinhos()
             else:
                 print("Comando não conhecido\n")
