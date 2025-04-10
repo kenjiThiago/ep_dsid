@@ -76,6 +76,7 @@ class Peer:
         if (ip, porta) in self.vizinhos_hash:
             vizinho = self.vizinhos_hash[ip, porta]
             self.__atualiza_status(vizinho, status)
+            self.__atualiza_relogio_vizinhos(vizinho.ip, vizinho.porta, relogio)
             return
 
         print("    ", end="")
@@ -106,7 +107,6 @@ class Peer:
 
         print(f'    Resposta recebida: "{resposta}"')
         self.__atualiza_relogio(relogio)
-        self.__atualiza_relogio_vizinhos(ip_origem, porta_origem, relogio)
 
         if tipo_mensagem == "PEER_LIST":
             numero_vizinhos = args[0]
@@ -115,6 +115,7 @@ class Peer:
 
             for _ in range(int(numero_vizinhos)):
                 ip_vizinho, porta_vizinho, status_vizinho, relogio = args.pop().split(":")
+                relogio = int(relogio)
                 porta_vizinho = int(porta_vizinho)
 
                 self.__atualiza_ou_adiciona_vizinho(ip_vizinho, porta_vizinho, status_vizinho, relogio)
@@ -152,7 +153,6 @@ class Peer:
 
         print(f'\n    Mensagem recebida: "{mensagem}"')
         self.__atualiza_relogio(relogio)
-        self.__atualiza_relogio_vizinhos(ip_origem, porta_origem, relogio)
 
         if tipo_mensagem == "HELLO": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
         elif tipo_mensagem == "GET_PEERS":
