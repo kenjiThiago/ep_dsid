@@ -1,5 +1,6 @@
 import socket
 from typing import List, Tuple
+import base64
 import os
 
 class Vizinho:
@@ -19,8 +20,12 @@ class Peer:
     porta: int
     vizinhos: List[Vizinho]
     vizinhos_hash: dict[Tuple[str, int], Vizinho]
-    diretorio_compartilhado: List[str]
+    diretorio_compartilhado: List[Tuple[str, int]]
+    diretorio_compartilhado_set: set[str]
+    caminho_diretorio_compartilhado: str
     relogio: int
+    ls_arquivos_tamanho: int
+    ls_arquivos: List[Tuple[str, str]]
 
     def __init__(self, ip, porta, arquivo_vizinhos, diretorio_compartilhado):
         self.ip = ip
@@ -29,6 +34,8 @@ class Peer:
         self.vizinhos = []
         self.vizinhos_hash = {}
         self.diretorio_compartilhado = []
+        self.diretorio_compartilhado_set = set()
+        self.caminho_diretorio_compartilhado = diretorio_compartilhado
 
         try:
             with open(arquivo_vizinhos) as arquivo:
@@ -42,7 +49,8 @@ class Peer:
 
             for f in os.scandir(diretorio_compartilhado):
                 if f.is_file():
-                    self.diretorio_compartilhado.append(f.name)
+                    self.diretorio_compartilhado.append((f.name, f.stat().st_size))
+                    self.diretorio_compartilhado_set.add(f.name)
         except OSError as e:
             print(e)
             exit(1)
@@ -72,7 +80,18 @@ class Peer:
         self.vizinhos.append(vizinho)
         self.vizinhos_hash[ip, porta] = vizinho
 
-    def __atualiza_ou_adiciona_vizinho(self, ip, porta, status, relogio):
+    def __atualiza_ou_adiciona_vizinho_indireto(self, ip, porta, status, relogio):
+        if (ip, porta) in self.vizinhos_hash:
+            vizinho = self.vizinhos_hash[ip, porta]
+            if vizinho.relogio > relogio: return
+            self.__atualiza_status(vizinho, status)
+            self.__atualiza_relogio_vizinhos(vizinho.ip, vizinho.porta, relogio)
+            return
+
+        print("    ", end="")
+        self.__adiciona_novo_vizinho(ip, porta, status, relogio)
+
+    def __atualiza_ou_adiciona_vizinho_direto(self, ip, porta, status, relogio):
         if (ip, porta) in self.vizinhos_hash:
             vizinho = self.vizinhos_hash[ip, porta]
             self.__atualiza_status(vizinho, status)
@@ -111,21 +130,43 @@ class Peer:
         if tipo_mensagem == "PEER_LIST":
             numero_vizinhos = args[0]
 
-            self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
+            self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "ONLINE", relogio)
 
             for _ in range(int(numero_vizinhos)):
                 ip_vizinho, porta_vizinho, status_vizinho, relogio = args.pop().split(":")
                 relogio = int(relogio)
                 porta_vizinho = int(porta_vizinho)
 
-                self.__atualiza_ou_adiciona_vizinho(ip_vizinho, porta_vizinho, status_vizinho, relogio)
+                self.__atualiza_ou_adiciona_vizinho_indireto(ip_vizinho, porta_vizinho, status_vizinho, relogio)
+        elif tipo_mensagem == "LS_LIST":
+            self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "ONLINE", relogio)
+            numero_arquivos = int(args[0])
+            arquivos: List[str] = args[1:]
+            self.ls_arquivos_tamanho += numero_arquivos
+
+            for i in range(numero_arquivos):
+                self.ls_arquivos.append((arquivos[i], f"{ip_origem}:{porta_origem}"))
+        elif tipo_mensagem == "FILE":
+            nome_arquivo = args[0]
+            conteudo_base64 = base64.b64decode(args[len(args) - 1])
+            conteudo_str = conteudo_base64.decode("utf-8")
+
+            with open(os.path.join(self.caminho_diretorio_compartilhado, nome_arquivo), "w") as arquivo:
+                arquivo.write(conteudo_str)
+                arquivo.seek(0, 2)
+                tamanho = arquivo.tell()
+                if nome_arquivo not in self.diretorio_compartilhado_set:
+                    self.diretorio_compartilhado.append((nome_arquivo, tamanho))
+
+            print(f"\nDownload do arquivo {nome_arquivo} finalizado.")
 
     def __manda_mensagem(self, ip_destino, porta_destino, conteudo_mensagem) -> bool:
-        if conteudo_mensagem != "CLOSE": self.__atualiza_relogio(0)
+        tipo_mensagem = conteudo_mensagem.split(" ")[0]
+        if tipo_mensagem != "CLOSE": self.__atualiza_relogio(0)
 
         mensagem = f"{self.ip}:{self.porta} {self.relogio} {conteudo_mensagem}"
 
-        if conteudo_mensagem != "CLOSE": print(f'    Encaminhando mensagem "{mensagem}" para {ip_destino}:{porta_destino}')
+        if tipo_mensagem != "CLOSE": print(f'    Encaminhando mensagem "{mensagem}" para {ip_destino}:{porta_destino}')
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as socket_cliente:
             try:
@@ -133,13 +174,13 @@ class Peer:
 
                 socket_cliente.sendall(mensagem.encode())
 
-                if conteudo_mensagem == "GET_PEERS":
+                if tipo_mensagem == "GET_PEERS" or tipo_mensagem == "LS" or tipo_mensagem == "DL":
                     resposta = socket_cliente.recv(1024).decode()
                     if resposta: self.__processa_resposta(resposta)
 
                 return True
-            except:
-                print(f"    [Erro] Falha na conexão")
+            except OSError as e:
+                print(f"    [Erro] Falha na conexão {e}")
                 return False
 
     def __processa_mensagem(self, conexao) -> bool:
@@ -147,16 +188,16 @@ class Peer:
 
         if not mensagem: return False
 
-        ip_origem, porta_origem, relogio, tipo_mensagem, _ = self.__processa_parametros(mensagem)
+        ip_origem, porta_origem, relogio, tipo_mensagem, args = self.__processa_parametros(mensagem)
 
         if tipo_mensagem == "CLOSE": return True
 
         print(f'\n    Mensagem recebida: "{mensagem}"')
         self.__atualiza_relogio(relogio)
 
-        if tipo_mensagem == "HELLO": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
+        if tipo_mensagem == "HELLO": self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "ONLINE", relogio)
         elif tipo_mensagem == "GET_PEERS":
-            self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
+            self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "ONLINE", relogio)
 
             resposta = f"PEER_LIST {len(self.vizinhos) - 1}"
             for vizinho in self.vizinhos:
@@ -165,7 +206,25 @@ class Peer:
                 resposta += f" {vizinho.ip}:{vizinho.porta}:{vizinho.status}:{vizinho.relogio}"
 
             self.__manda_resposta(conexao, ip_origem, porta_origem, resposta)
-        elif tipo_mensagem == "BYE": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "OFFLINE", relogio)
+        elif tipo_mensagem == "LS":
+            self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "ONLINE", relogio)
+            resposta = f"LS_LIST {len(self.diretorio_compartilhado)}"
+
+            for arquivos in self.diretorio_compartilhado:
+                resposta += f" {arquivos[0]}:{arquivos[1]}"
+
+            self.__manda_resposta(conexao, ip_origem, porta_origem, resposta)
+
+        elif tipo_mensagem == "DL":
+            self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "ONLINE", relogio)
+            nome_arquivo = args[0]
+
+            with open(os.path.join(self.caminho_diretorio_compartilhado, nome_arquivo), "rb") as arquivo:
+                conteudo_bytes = arquivo.read()
+                conteudo_str = base64.b64encode(conteudo_bytes).decode("utf-8")
+                self.__manda_resposta(conexao, ip_origem, porta_origem, f"FILE {nome_arquivo} 0 0 {conteudo_str}")
+
+        elif tipo_mensagem == "BYE": self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "OFFLINE", relogio)
         else: print("Formato da mensagem errado")
 
         return False
@@ -221,7 +280,38 @@ class Peer:
 
     def lista_arquivos_locais(self):
         for arquivo in self.diretorio_compartilhado:
-            print(arquivo)
+            print(arquivo[0])
+
+        print()
+
+    def busca_arquivos(self):
+        self.ls_arquivos_tamanho = 0
+        self.ls_arquivos = []
+        for vizinho in self.vizinhos:
+            if (vizinho.status == "OFFLINE"): continue
+
+            if (not self.__manda_mensagem(vizinho.ip, vizinho.porta, "LS")):
+                self.__atualiza_status(vizinho, "OFFLINE")
+
+        print("\nArquivos encontrados na rede:")
+        print(f"    {'':<5} {'Nome':<20} | {'Tamanho':<10} | {'Peer'}")
+
+        for i in range(self.ls_arquivos_tamanho):
+            nome, tamanho = self.ls_arquivos[i][0].split(":")
+            ip_origem, porta_origem = self.ls_arquivos[i][1].split(":")
+            porta_origem = int(porta_origem)
+            print(f"    [{i + 1:2}] {nome:<21} | {tamanho:<10} | {ip_origem}:{porta_origem}")
+
+        comando = int(input('''\nDigite o numero do arquivo para fazer o download:
+> '''))
+        if comando >= self.ls_arquivos_tamanho: return
+
+        arquivo_escolhido, tamanho = self.ls_arquivos[comando - 1][0].split(":")
+        ip_destino, porta_destino = self.ls_arquivos[comando - 1][1].split(":")
+        porta_destino = int(porta_destino)
+        print(f"arquivo escolhido {arquivo_escolhido}")
+
+        self.__manda_mensagem(ip_destino, porta_destino, f"DL {arquivo_escolhido} 0 0")
 
         print()
 
@@ -229,8 +319,7 @@ class Peer:
         print("Saindo...")
 
         for vizinho in self.vizinhos:
-            if (vizinho.status == "OFFLINE"):
-                continue
+            if (vizinho.status == "OFFLINE"): continue
 
             self.__manda_mensagem(vizinho.ip, vizinho.porta, "BYE")
 
@@ -257,7 +346,7 @@ class Peer:
             elif comando == "3":
                 self.lista_arquivos_locais()
             elif comando == "4":
-                print("[TODO] Implementar busca de arquivos\n")
+                self.busca_arquivos()
             elif comando == "5":
                 print("[TODO] Implementar exibição de estatísticas\n")
             elif comando == "6":
