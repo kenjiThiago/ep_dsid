@@ -30,12 +30,12 @@ class Peer:
     def __init__(self, ip, porta, arquivo_vizinhos, diretorio_compartilhado):
         self.ip = ip
         self.porta = porta
-        self.relogio = 0
         self.vizinhos = []
         self.vizinhos_hash = {}
         self.diretorio_compartilhado = []
         self.diretorio_compartilhado_set = set()
         self.caminho_diretorio_compartilhado = diretorio_compartilhado
+        self.relogio = 0
 
         try:
             with open(arquivo_vizinhos) as arquivo:
@@ -148,15 +148,15 @@ class Peer:
                 self.ls_arquivos.append((arquivos[i], f"{ip_origem}:{porta_origem}"))
         elif tipo_mensagem == "FILE":
             nome_arquivo = args[0]
-            conteudo_base64 = base64.b64decode(args[len(args) - 1])
-            conteudo_str = conteudo_base64.decode("utf-8")
+            conteudo = base64.b64decode(args[len(args) - 1])
 
-            with open(os.path.join(self.caminho_diretorio_compartilhado, nome_arquivo), "w") as arquivo:
-                arquivo.write(conteudo_str)
+            with open(os.path.join(self.caminho_diretorio_compartilhado, nome_arquivo), "wb") as arquivo:
+                arquivo.write(conteudo)
                 arquivo.seek(0, 2)
                 tamanho = arquivo.tell()
                 if nome_arquivo not in self.diretorio_compartilhado_set:
                     self.diretorio_compartilhado.append((nome_arquivo, tamanho))
+                    self.diretorio_compartilhado_set.add(nome_arquivo)
 
             print(f"\nDownload do arquivo {nome_arquivo} finalizado.")
 
@@ -175,8 +175,14 @@ class Peer:
                 socket_cliente.sendall(mensagem.encode())
 
                 if tipo_mensagem == "GET_PEERS" or tipo_mensagem == "LS" or tipo_mensagem == "DL":
-                    resposta = socket_cliente.recv(1024).decode()
-                    if resposta: self.__processa_resposta(resposta)
+                    conteudo: str = ""
+
+                    while True:
+                        resposta = socket_cliente.recv(1024).decode()
+                        conteudo += resposta
+                        if not resposta: break
+
+                    if conteudo: self.__processa_resposta(conteudo)
 
                 return True
             except OSError as e:
@@ -304,7 +310,7 @@ class Peer:
 
         comando = int(input('''\nDigite o numero do arquivo para fazer o download:
 > '''))
-        if comando >= self.ls_arquivos_tamanho: return
+        if comando > self.ls_arquivos_tamanho: return
 
         arquivo_escolhido, tamanho = self.ls_arquivos[comando - 1][0].split(":")
         ip_destino, porta_destino = self.ls_arquivos[comando - 1][1].split(":")
