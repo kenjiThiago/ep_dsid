@@ -147,6 +147,7 @@ class Peer:
             for i in range(numero_arquivos):
                 self.ls_arquivos.append((arquivos[i], f"{ip_origem}:{porta_origem}"))
         elif tipo_mensagem == "FILE":
+            self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "ONLINE", relogio)
             nome_arquivo = args[0]
             conteudo = base64.b64decode(args[len(args) - 1])
 
@@ -301,6 +302,7 @@ class Peer:
 
         print("\nArquivos encontrados na rede:")
         print(f"    {'':<5} {'Nome':<20} | {'Tamanho':<10} | {'Peer'}")
+        print(f"    [{' 0':2}] {'<Cancelar>':<21} | {'':<10} | ")
 
         for i in range(self.ls_arquivos_tamanho):
             nome, tamanho = self.ls_arquivos[i][0].split(":")
@@ -310,12 +312,12 @@ class Peer:
 
         comando = int(input('''\nDigite o numero do arquivo para fazer o download:
 > '''))
-        if comando > self.ls_arquivos_tamanho: return
+        if comando > self.ls_arquivos_tamanho or comando == 0: return
 
         arquivo_escolhido, tamanho = self.ls_arquivos[comando - 1][0].split(":")
         ip_destino, porta_destino = self.ls_arquivos[comando - 1][1].split(":")
         porta_destino = int(porta_destino)
-        print(f"arquivo escolhido {arquivo_escolhido}")
+        print(f"arquivo escolhido {arquivo_escolhido}\n")
 
         self.__manda_mensagem(ip_destino, porta_destino, f"DL {arquivo_escolhido} 0 0")
 
