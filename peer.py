@@ -119,9 +119,12 @@ class Peer:
 
         print(f'    Encaminhando resposta "{mensagem}" para {ip_destino}:{porta_destino}')
 
+        mensagem += "\n"
+
         conexao.sendall(mensagem.encode())
 
     def __processa_resposta(self, resposta):
+        resposta = resposta.strip("\n")
         ip_origem, porta_origem, relogio, tipo_mensagem, args = self.__processa_parametros(resposta)
 
         print(f'    Resposta recebida: "{resposta}"')
@@ -169,6 +172,8 @@ class Peer:
 
         if tipo_mensagem != "CLOSE": print(f'    Encaminhando mensagem "{mensagem}" para {ip_destino}:{porta_destino}')
 
+        mensagem += "\n"
+
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as socket_cliente:
             try:
                 socket_cliente.connect((ip_destino, porta_destino))
@@ -192,6 +197,7 @@ class Peer:
 
     def __processa_mensagem(self, conexao) -> bool:
         mensagem = conexao.recv(1024).decode()
+        mensagem = mensagem.strip("\n")
 
         if not mensagem: return False
 
