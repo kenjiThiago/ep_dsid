@@ -55,11 +55,6 @@ class Peer:
             print(e)
             exit(1)
 
-    def __printa_vizinhos(self):
-        for vizinho in self.vizinhos:
-            print(f"{vizinho.ip}:{vizinho.porta}", vizinho.status, vizinho.relogio)
-        print()
-
     def __atualiza_relogio(self, relogio_vizinho):
         self.relogio = max(self.relogio, relogio_vizinho)
         self.relogio += 1
@@ -368,7 +363,5 @@ class Peer:
             elif comando == "9":
                 self.sair()
                 break
-            elif comando == "10":
-                self.__printa_vizinhos()
             else:
                 print("Comando não conhecido\n")
