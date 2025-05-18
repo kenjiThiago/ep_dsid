@@ -60,11 +60,6 @@ class Peer:
         self.relogio += 1
         print(f"    => Atualizando relogio para {self.relogio}")
 
-    def __atualiza_relogio_vizinhos(self, ip, porta, relogio):
-        if (ip, porta) in self.vizinhos_hash:
-            vizinho = self.vizinhos_hash[ip, porta]
-            vizinho.relogio = max(vizinho.relogio, relogio)
-
     def __atualiza_status(self, peer, status):
         peer.status = status
         print(f"    Atualizando peer {peer.ip}:{peer.porta} status {peer.status}")
@@ -75,22 +70,12 @@ class Peer:
         self.vizinhos.append(vizinho)
         self.vizinhos_hash[ip, porta] = vizinho
 
-    def __atualiza_ou_adiciona_vizinho_indireto(self, ip, porta, status, relogio):
+    def __atualiza_ou_adiciona_vizinho(self, ip, porta, status, relogio, modo=None):
         if (ip, porta) in self.vizinhos_hash:
             vizinho = self.vizinhos_hash[ip, porta]
-            if vizinho.relogio > relogio: return
+            if vizinho.relogio > relogio and modo == "indireto": return
             self.__atualiza_status(vizinho, status)
-            self.__atualiza_relogio_vizinhos(vizinho.ip, vizinho.porta, relogio)
-            return
-
-        print("    ", end="")
-        self.__adiciona_novo_vizinho(ip, porta, status, relogio)
-
-    def __atualiza_ou_adiciona_vizinho_direto(self, ip, porta, status, relogio):
-        if (ip, porta) in self.vizinhos_hash:
-            vizinho = self.vizinhos_hash[ip, porta]
-            self.__atualiza_status(vizinho, status)
-            self.__atualiza_relogio_vizinhos(vizinho.ip, vizinho.porta, relogio)
+            vizinho.relogio = max(vizinho.relogio, relogio)
             return
 
         print("    ", end="")
@@ -128,16 +113,16 @@ class Peer:
         if tipo_mensagem == "PEER_LIST":
             numero_vizinhos = args[0]
 
-            self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "ONLINE", relogio)
+            self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
 
             for _ in range(int(numero_vizinhos)):
                 ip_vizinho, porta_vizinho, status_vizinho, relogio = args.pop().split(":")
                 relogio = int(relogio)
                 porta_vizinho = int(porta_vizinho)
 
-                self.__atualiza_ou_adiciona_vizinho_indireto(ip_vizinho, porta_vizinho, status_vizinho, relogio)
+                self.__atualiza_ou_adiciona_vizinho(ip_vizinho, porta_vizinho, status_vizinho, relogio, "indireto")
         elif tipo_mensagem == "LS_LIST":
-            self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "ONLINE", relogio)
+            self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
             numero_arquivos = int(args[0])
             arquivos: List[str] = args[1:]
             self.ls_arquivos_tamanho += numero_arquivos
@@ -145,7 +130,7 @@ class Peer:
             for i in range(numero_arquivos):
                 self.ls_arquivos.append((arquivos[i], f"{ip_origem}:{porta_origem}"))
         elif tipo_mensagem == "FILE":
-            self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "ONLINE", relogio)
+            self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
             nome_arquivo = args[0]
             conteudo = base64.b64decode(args[len(args) - 1])
 
@@ -186,8 +171,8 @@ class Peer:
                     if conteudo: self.__processa_resposta(conteudo)
 
                 return True
-            except OSError as e:
-                print(f"    [Erro] Falha na conexão {e}")
+            except:
+                print(f"    [Erro] Falha na conexão")
                 return False
 
     def __processa_mensagem(self, conexao) -> bool:
@@ -203,9 +188,9 @@ class Peer:
         print(f'\n    Mensagem recebida: "{mensagem}"')
         self.__atualiza_relogio(relogio)
 
-        if tipo_mensagem == "HELLO": self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "ONLINE", relogio)
+        if tipo_mensagem == "HELLO": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
         elif tipo_mensagem == "GET_PEERS":
-            self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "ONLINE", relogio)
+            self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
 
             resposta = f"PEER_LIST {len(self.vizinhos) - 1}"
             for vizinho in self.vizinhos:
@@ -215,7 +200,7 @@ class Peer:
 
             self.__manda_resposta(conexao, ip_origem, porta_origem, resposta)
         elif tipo_mensagem == "LS":
-            self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "ONLINE", relogio)
+            self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
             resposta = f"LS_LIST {len(self.diretorio_compartilhado)}"
 
             for arquivos in self.diretorio_compartilhado:
@@ -224,7 +209,7 @@ class Peer:
             self.__manda_resposta(conexao, ip_origem, porta_origem, resposta)
 
         elif tipo_mensagem == "DL":
-            self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "ONLINE", relogio)
+            self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
             nome_arquivo = args[0]
 
             with open(os.path.join(self.caminho_diretorio_compartilhado, nome_arquivo), "rb") as arquivo:
@@ -232,7 +217,7 @@ class Peer:
                 conteudo_str = base64.b64encode(conteudo_bytes).decode("utf-8")
                 self.__manda_resposta(conexao, ip_origem, porta_origem, f"FILE {nome_arquivo} 0 0 {conteudo_str}")
 
-        elif tipo_mensagem == "BYE": self.__atualiza_ou_adiciona_vizinho_direto(ip_origem, porta_origem, "OFFLINE", relogio)
+        elif tipo_mensagem == "BYE": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "OFFLINE", relogio)
         else: print("Formato da mensagem errado")
 
         return False
@@ -253,7 +238,7 @@ class Peer:
         [0] voltar para o menu anterior''')
 
         for i, vizinho in enumerate(self.vizinhos):
-            print(f"        [{i + 1}] {vizinho.ip}:{vizinho.porta} {vizinho.status}")
+            print(f"        [{i + 1}] {vizinho.ip}:{vizinho.porta} {vizinho.status} (clock: {vizinho.relogio})")
         comando = input("> ")
         print()
 
