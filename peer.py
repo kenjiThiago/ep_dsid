@@ -26,6 +26,7 @@ class Peer:
     relogio: int
     ls_arquivos_tamanho: int
     ls_arquivos: List[Tuple[str, str]]
+    tamanho_chunk: int
 
     def __init__(self, ip, porta, arquivo_vizinhos, diretorio_compartilhado):
         self.ip = ip
@@ -36,6 +37,7 @@ class Peer:
         self.diretorio_compartilhado_set = set()
         self.caminho_diretorio_compartilhado = diretorio_compartilhado
         self.relogio = 0
+        self.tamanho_chunk = 256
 
         try:
             with open(arquivo_vizinhos) as arquivo:
@@ -309,6 +311,13 @@ class Peer:
 
         print()
 
+    def altera_tamanho_chunk(self):
+        print("Digite novo tamanho de chunk:")
+        novo_tamanho_chunk = int(input("> "))
+
+        self.tamanho_chunk = novo_tamanho_chunk
+        print(f"\n        Tamanho de chunk alterado: {self.tamanho_chunk}\n")
+
     def sair(self):
         print("Saindo...")
 
@@ -344,7 +353,7 @@ class Peer:
             elif comando == "5":
                 print("[TODO] Implementar exibição de estatísticas\n")
             elif comando == "6":
-                print("[TODO] Implementar alteração de tamanho de chunk\n")
+                self.altera_tamanho_chunk()
             elif comando == "9":
                 self.sair()
                 break
