@@ -2,6 +2,8 @@ import socket
 from typing import List, Tuple
 import base64
 import os
+import math
+import threading
 
 class Vizinho:
     ip: str
@@ -26,6 +28,7 @@ class Peer:
     relogio: int
     ls_arquivos_tamanho: int
     ls_arquivos: List[Tuple[str, str]]
+    ls_arquivos_hash: dict[str, int]
     tamanho_chunk: int
 
     def __init__(self, ip, porta, arquivo_vizinhos, diretorio_compartilhado):
@@ -127,24 +130,37 @@ class Peer:
             self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
             numero_arquivos = int(args[0])
             arquivos: List[str] = args[1:]
-            self.ls_arquivos_tamanho += numero_arquivos
 
             for i in range(numero_arquivos):
-                self.ls_arquivos.append((arquivos[i], f"{ip_origem}:{porta_origem}"))
+                nome_arquivo = arquivos[i]
+                origem = f"{ip_origem}:{porta_origem}"
+                if nome_arquivo not in self.ls_arquivos_hash:
+                    self.ls_arquivos_hash[nome_arquivo] = i
+                    self.ls_arquivos.append((nome_arquivo, origem))
+                    self.ls_arquivos_tamanho += 1
+                else:
+                    indice = self.ls_arquivos_hash[nome_arquivo]
+                    nome, origens_atuais = self.ls_arquivos[indice]
+                    nova_origens = origens_atuais + ", " + origem
+                    self.ls_arquivos[indice] = (nome, nova_origens)
         elif tipo_mensagem == "FILE":
             self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
             nome_arquivo = args[0]
-            conteudo = base64.b64decode(args[len(args) - 1])
+            chunk = int(args[2])
+            conteudo = base64.b64decode(args[3])
 
-            with open(os.path.join(self.caminho_diretorio_compartilhado, nome_arquivo), "wb") as arquivo:
+            offset = chunk * self.tamanho_chunk
+
+            caminho_arquivo = os.path.join(self.caminho_diretorio_compartilhado, nome_arquivo)
+            modo = "r+b" if os.path.exists(caminho_arquivo) else "wb"
+            with open(caminho_arquivo, modo) as arquivo:
+                arquivo.seek(offset)
                 arquivo.write(conteudo)
                 arquivo.seek(0, 2)
                 tamanho = arquivo.tell()
                 if nome_arquivo not in self.diretorio_compartilhado_set:
                     self.diretorio_compartilhado.append((nome_arquivo, tamanho))
                     self.diretorio_compartilhado_set.add(nome_arquivo)
-
-            print(f"\nDownload do arquivo {nome_arquivo} finalizado.")
 
     def __manda_mensagem(self, ip_destino, porta_destino, conteudo_mensagem) -> bool:
         tipo_mensagem = conteudo_mensagem.split(" ")[0]
@@ -173,8 +189,8 @@ class Peer:
                     if conteudo: self.__processa_resposta(conteudo)
 
                 return True
-            except:
-                print(f"    [Erro] Falha na conexão")
+            except OSError as e:
+                print(f"    [Erro] Falha na conexão {e}")
                 return False
 
     def __processa_mensagem(self, conexao) -> bool:
@@ -213,11 +229,16 @@ class Peer:
         elif tipo_mensagem == "DL":
             self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
             nome_arquivo = args[0]
+            tamanho_chunk = int(args[1])
+            chunk = int(args[2])
+
+            offset = chunk * self.tamanho_chunk
 
             with open(os.path.join(self.caminho_diretorio_compartilhado, nome_arquivo), "rb") as arquivo:
-                conteudo_bytes = arquivo.read()
+                arquivo.seek(offset)
+                conteudo_bytes = arquivo.read(tamanho_chunk)
                 conteudo_str = base64.b64encode(conteudo_bytes).decode("utf-8")
-                self.__manda_resposta(conexao, ip_origem, porta_origem, f"FILE {nome_arquivo} 0 0 {conteudo_str}")
+                self.__manda_resposta(conexao, ip_origem, porta_origem, f"FILE {nome_arquivo} {tamanho_chunk} {chunk} {conteudo_str}")
 
         elif tipo_mensagem == "BYE": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "OFFLINE", relogio)
         else: print("Formato da mensagem errado")
@@ -282,6 +303,7 @@ class Peer:
     def busca_arquivos(self):
         self.ls_arquivos_tamanho = 0
         self.ls_arquivos = []
+        self.ls_arquivos_hash = {}
         for vizinho in self.vizinhos:
             if (vizinho.status == "OFFLINE"): continue
 
@@ -294,20 +316,38 @@ class Peer:
 
         for i in range(self.ls_arquivos_tamanho):
             nome, tamanho = self.ls_arquivos[i][0].split(":")
-            ip_origem, porta_origem = self.ls_arquivos[i][1].split(":")
-            porta_origem = int(porta_origem)
-            print(f"    [{i + 1:2}] {nome:<21} | {tamanho:<10} | {ip_origem}:{porta_origem}")
+            origens = self.ls_arquivos[i][1]
+            print(f"    [{i + 1:2}] {nome:<21} | {tamanho:<10} | {origens}")
 
         comando = int(input('''\nDigite o numero do arquivo para fazer o download:
 > '''))
         if comando > self.ls_arquivos_tamanho or comando == 0: return
 
         arquivo_escolhido, tamanho = self.ls_arquivos[comando - 1][0].split(":")
-        ip_destino, porta_destino = self.ls_arquivos[comando - 1][1].split(":")
-        porta_destino = int(porta_destino)
-        print(f"arquivo escolhido {arquivo_escolhido}\n")
 
-        self.__manda_mensagem(ip_destino, porta_destino, f"DL {arquivo_escolhido} 0 0")
+        destinos = self.ls_arquivos[comando - 1][1].split(", ")
+        numero_destinos = len(destinos)
+        print(f"arquivo escolhido {arquivo_escolhido}\n")
+        tamanho = int(tamanho)
+
+        numero_chunks = math.ceil(tamanho / self.tamanho_chunk)
+        thread_mensagens = []
+        for c in range(numero_chunks):
+            ip_destino, porta_destino = destinos[c % numero_destinos].split(":")
+            porta_destino = int(porta_destino)
+            tamanho_chunk_mensagem = min(self.tamanho_chunk, tamanho - c * self.tamanho_chunk)
+            thread_mensagem = threading.Thread(
+                target=self.__manda_mensagem,
+                args=(ip_destino, porta_destino, f"DL {arquivo_escolhido} {tamanho_chunk_mensagem} {c}"),
+                daemon=True
+            )
+            thread_mensagens.append(thread_mensagem)
+            thread_mensagem.start()
+
+        for thread_mensagem in thread_mensagens:
+            thread_mensagem.join()
+
+        print(f"\nDownload do arquivo {arquivo_escolhido} finalizado.")
 
         print()
 
