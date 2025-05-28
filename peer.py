@@ -4,43 +4,40 @@ import base64
 import os
 import math
 import threading
+import time
+import statistics
 
 class Vizinho:
-    ip: str
-    porta: int
-    status: str
-    relogio: int
 
     def __init__(self, ip, porta, status, relogio):
-        self.ip = ip
-        self.porta = porta
-        self.status = status
-        self.relogio = relogio
+        self.ip: str = ip
+        self.porta: int = porta
+        self.status: str = status
+        self.relogio: int = relogio
 
 class Peer:
-    ip: str
-    porta: int
-    vizinhos: List[Vizinho]
-    vizinhos_hash: dict[Tuple[str, int], Vizinho]
-    diretorio_compartilhado: List[Tuple[str, int]]
-    diretorio_compartilhado_set: set[str]
-    caminho_diretorio_compartilhado: str
-    relogio: int
-    ls_arquivos_tamanho: int
-    ls_arquivos: List[Tuple[str, str]]
-    ls_arquivos_hash: dict[str, int]
-    tamanho_chunk: int
 
     def __init__(self, ip, porta, arquivo_vizinhos, diretorio_compartilhado):
-        self.ip = ip
-        self.porta = porta
-        self.vizinhos = []
-        self.vizinhos_hash = {}
-        self.diretorio_compartilhado = []
-        self.diretorio_compartilhado_set = set()
-        self.caminho_diretorio_compartilhado = diretorio_compartilhado
-        self.relogio = 0
-        self.tamanho_chunk = 256
+        self.ip: str = ip
+        self.porta: int = porta
+        self.vizinhos: List[Vizinho] = []
+        self.vizinhos_hash: dict[Tuple[str, int], Vizinho] = {}
+        self.diretorio_compartilhado: List[Tuple[str, int]] = []
+        self.diretorio_compartilhado_set: set[str] = set()
+        self.caminho_diretorio_compartilhado: str = diretorio_compartilhado
+        self.relogio: int = 0
+        self.tamanho_chunk: int = 256
+        self.ls_arquivos_tamanho: int = 0
+        self.ls_arquivos: List[Tuple[str, str]] = []
+        self.ls_arquivos_hash: dict[str, int] = {}
+        self.tempo_total_escrita: float = 0.0
+        self.estatisticas: dict[Tuple[int, int, int], List[float]] = {}
+
+        self.relogio_lock = threading.Lock()
+        self.main_lock = threading.Lock()
+        self.file_locks = {}
+        self.file_locks_lock = threading.Lock()
+        self.tempo_escrita_lock = threading.Lock()
 
         try:
             with open(arquivo_vizinhos) as arquivo:
@@ -61,9 +58,11 @@ class Peer:
             exit(1)
 
     def __atualiza_relogio(self, relogio_vizinho):
-        self.relogio = max(self.relogio, relogio_vizinho)
-        self.relogio += 1
-        print(f"    => Atualizando relogio para {self.relogio}")
+        with self.relogio_lock:
+            self.relogio = max(self.relogio, relogio_vizinho)
+            self.relogio += 1
+            relogio = self.relogio
+            print(f"    => Atualizando relogio para {relogio}")
 
     def __atualiza_status(self, peer, status):
         peer.status = status
@@ -76,15 +75,16 @@ class Peer:
         self.vizinhos_hash[ip, porta] = vizinho
 
     def __atualiza_ou_adiciona_vizinho(self, ip, porta, status, relogio, modo=None):
-        if (ip, porta) in self.vizinhos_hash:
-            vizinho = self.vizinhos_hash[ip, porta]
-            if vizinho.relogio > relogio and modo == "indireto": return
-            self.__atualiza_status(vizinho, status)
-            vizinho.relogio = max(vizinho.relogio, relogio)
-            return
+        with self.main_lock:
+            if (ip, porta) in self.vizinhos_hash:
+                vizinho = self.vizinhos_hash[ip, porta]
+                if vizinho.relogio > relogio and modo == "indireto": return
+                self.__atualiza_status(vizinho, status)
+                vizinho.relogio = max(vizinho.relogio, relogio)
+                return
 
-        print("    ", end="")
-        self.__adiciona_novo_vizinho(ip, porta, status, relogio)
+            print("    ", end="")
+            self.__adiciona_novo_vizinho(ip, porta, status, relogio)
 
     def __processa_parametros(self, mensagem) -> Tuple[str, int, int, str, List]:
         parametros = mensagem.split(" ")
@@ -132,14 +132,14 @@ class Peer:
             arquivos: List[str] = args[1:]
 
             for i in range(numero_arquivos):
-                nome_arquivo = arquivos[i]
+                arquivo = arquivos[i]
                 origem = f"{ip_origem}:{porta_origem}"
-                if nome_arquivo not in self.ls_arquivos_hash:
-                    self.ls_arquivos_hash[nome_arquivo] = i
-                    self.ls_arquivos.append((nome_arquivo, origem))
+                if arquivo not in self.ls_arquivos_hash:
+                    self.ls_arquivos_hash[arquivo] = self.ls_arquivos_tamanho
+                    self.ls_arquivos.append((arquivo, origem))
                     self.ls_arquivos_tamanho += 1
                 else:
-                    indice = self.ls_arquivos_hash[nome_arquivo]
+                    indice = self.ls_arquivos_hash[arquivo]
                     nome, origens_atuais = self.ls_arquivos[indice]
                     nova_origens = origens_atuais + ", " + origem
                     self.ls_arquivos[indice] = (nome, nova_origens)
@@ -148,19 +148,32 @@ class Peer:
             nome_arquivo = args[0]
             chunk = int(args[2])
             conteudo = base64.b64decode(args[3])
-
             offset = chunk * self.tamanho_chunk
 
-            caminho_arquivo = os.path.join(self.caminho_diretorio_compartilhado, nome_arquivo)
-            modo = "r+b" if os.path.exists(caminho_arquivo) else "wb"
-            with open(caminho_arquivo, modo) as arquivo:
-                arquivo.seek(offset)
-                arquivo.write(conteudo)
-                arquivo.seek(0, 2)
-                tamanho = arquivo.tell()
-                if nome_arquivo not in self.diretorio_compartilhado_set:
-                    self.diretorio_compartilhado.append((nome_arquivo, tamanho))
-                    self.diretorio_compartilhado_set.add(nome_arquivo)
+            with self.file_locks_lock:
+                if nome_arquivo not in self.file_locks:
+                    self.file_locks[nome_arquivo] = threading.Lock()
+                file_lock = self.file_locks[nome_arquivo]
+
+            with file_lock:
+                caminho_arquivo = os.path.join(self.caminho_diretorio_compartilhado, nome_arquivo)
+                modo = "r+b" if os.path.exists(caminho_arquivo) else "wb"
+
+                inicio_escrita = time.perf_counter()
+                with open(caminho_arquivo, modo) as arquivo:
+                    arquivo.seek(offset)
+                    arquivo.write(conteudo)
+                    arquivo.seek(0, 2)
+                    tamanho = arquivo.tell()
+                    with self.main_lock:
+                        if nome_arquivo not in self.diretorio_compartilhado_set:
+                            self.diretorio_compartilhado.append((nome_arquivo, tamanho))
+                            self.diretorio_compartilhado_set.add(nome_arquivo)
+                fim_escrita = time.perf_counter()
+
+                with self.tempo_escrita_lock:
+                    self.tempo_total_escrita += (fim_escrita - inicio_escrita)
+
 
     def __manda_mensagem(self, ip_destino, porta_destino, conteudo_mensagem) -> bool:
         tipo_mensagem = conteudo_mensagem.split(" ")[0]
@@ -189,8 +202,14 @@ class Peer:
                     if conteudo: self.__processa_resposta(conteudo)
 
                 return True
-            except OSError as e:
-                print(f"    [Erro] Falha na conexão {e}")
+            except socket.timeout:
+                print(f"Timeout ao conectar com {ip_destino}:{porta_destino}")
+                return False
+            except ConnectionRefusedError:
+                print(f"Conexão recusada por {ip_destino}:{porta_destino}")
+                return False
+            except Exception as e:
+                print(f"Erro inesperado: {e}")
                 return False
 
     def __processa_mensagem(self, conexao) -> bool:
@@ -232,13 +251,14 @@ class Peer:
             tamanho_chunk = int(args[1])
             chunk = int(args[2])
 
-            offset = chunk * self.tamanho_chunk
+            offset = chunk * tamanho_chunk
 
             with open(os.path.join(self.caminho_diretorio_compartilhado, nome_arquivo), "rb") as arquivo:
                 arquivo.seek(offset)
                 conteudo_bytes = arquivo.read(tamanho_chunk)
+                tamanho_lido = len(conteudo_bytes)
                 conteudo_str = base64.b64encode(conteudo_bytes).decode("utf-8")
-                self.__manda_resposta(conexao, ip_origem, porta_origem, f"FILE {nome_arquivo} {tamanho_chunk} {chunk} {conteudo_str}")
+                self.__manda_resposta(conexao, ip_origem, porta_origem, f"FILE {nome_arquivo} {tamanho_lido} {chunk} {conteudo_str}")
 
         elif tipo_mensagem == "BYE": self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "OFFLINE", relogio)
         else: print("Formato da mensagem errado")
@@ -304,6 +324,7 @@ class Peer:
         self.ls_arquivos_tamanho = 0
         self.ls_arquivos = []
         self.ls_arquivos_hash = {}
+        self.tempo_total_escrita = 0.0
         for vizinho in self.vizinhos:
             if (vizinho.status == "OFFLINE"): continue
 
@@ -331,23 +352,54 @@ class Peer:
         tamanho = int(tamanho)
 
         numero_chunks = math.ceil(tamanho / self.tamanho_chunk)
-        thread_mensagens = []
-        for c in range(numero_chunks):
-            ip_destino, porta_destino = destinos[c % numero_destinos].split(":")
-            porta_destino = int(porta_destino)
-            tamanho_chunk_mensagem = min(self.tamanho_chunk, tamanho - c * self.tamanho_chunk)
-            thread_mensagem = threading.Thread(
-                target=self.__manda_mensagem,
-                args=(ip_destino, porta_destino, f"DL {arquivo_escolhido} {tamanho_chunk_mensagem} {c}"),
-                daemon=True
-            )
-            thread_mensagens.append(thread_mensagem)
-            thread_mensagem.start()
+        indice_chunk = 0
+        inicio = time.perf_counter()
+        while indice_chunk < numero_chunks:
+            thread_mensagens = []
 
-        for thread_mensagem in thread_mensagens:
-            thread_mensagem.join()
+            for _ in range(numero_destinos):
+                if indice_chunk >= numero_chunks:
+                    break
+
+                ip_destino, porta_destino = destinos[indice_chunk % numero_destinos].split(":")
+                porta_destino = int(porta_destino)
+
+                thread_mensagem = threading.Thread(
+                    target=self.__manda_mensagem,
+                    args=(ip_destino, porta_destino, f"DL {arquivo_escolhido} {self.tamanho_chunk} {indice_chunk}"),
+                )
+                thread_mensagens.append(thread_mensagem)
+                thread_mensagem.start()
+
+                indice_chunk += 1
+
+            for thread_mensagem in thread_mensagens:
+                thread_mensagem.join()
+
+        fim = time.perf_counter()
+
+        tempo_total = fim - inicio
+        tempo_sem_escrita = tempo_total - self.tempo_total_escrita
+
+        if (self.tamanho_chunk, numero_destinos, tamanho) not in self.estatisticas:
+            self.estatisticas[(self.tamanho_chunk, numero_destinos, tamanho)] = [tempo_sem_escrita]
+        else:
+            self.estatisticas[(self.tamanho_chunk, numero_destinos, tamanho)].append(tempo_sem_escrita)
 
         print(f"\nDownload do arquivo {arquivo_escolhido} finalizado.")
+
+        print()
+
+    def exibir_estatisticas(self):
+        print(f"{'Tam. chunk':>11} | {'N peers':>7} | {'Tam. arquivo':>13} | {'N':>2} | {'Tempo [s]':>10} | {'Desvio':>7}")
+        print("-" * 65)
+
+        for (chunk, n_peers, tam_arq), tempos in self.estatisticas.items():
+            n = len(tempos)
+            media = statistics.mean(tempos)
+            desvio = statistics.stdev(tempos) if n > 1 else 0.0
+
+            print(f"{chunk:11} | {n_peers:7} | {tam_arq:13} | {n:2} | {media:10.5f} | {desvio:7.5f}")
 
         print()
 
@@ -391,7 +443,7 @@ class Peer:
             elif comando == "4":
                 self.busca_arquivos()
             elif comando == "5":
-                print("[TODO] Implementar exibição de estatísticas\n")
+                self.exibir_estatisticas()
             elif comando == "6":
                 self.altera_tamanho_chunk()
             elif comando == "9":

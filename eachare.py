@@ -15,10 +15,10 @@ ip, porta = args.pop().split(":")
 
 peer = Peer(ip, int(porta), arquivo_vizinhos, diretorio_compartilhado)
 
-thread_servidor = threading.Thread(target = peer.inicia_servidor, daemon = True)
+thread_servidor = threading.Thread(target = peer.inicia_servidor)
 thread_servidor.start()
 
-thread_cliente = threading.Thread(target = peer.inicia_cliente, daemon = True)
+thread_cliente = threading.Thread(target = peer.inicia_cliente)
 thread_cliente.start()
 
 thread_servidor.join()
