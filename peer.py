@@ -34,7 +34,8 @@ class Peer:
         self.estatisticas: dict[Tuple[int, int, int], List[float]] = {}
 
         self.relogio_lock = threading.Lock()
-        self.main_lock = threading.Lock()
+        self.vizinhos_lock = threading.Lock()
+        self.diretorio_lock = threading.Lock()
         self.ls_lock = threading.Lock()
         self.file_locks = {}
         self.file_locks_lock = threading.Lock()
@@ -66,7 +67,7 @@ class Peer:
             print(f"    => Atualizando relogio para {relogio}")
 
     def __atualiza_status(self, peer, status):
-        with self.main_lock:
+        with self.vizinhos_lock:
             peer.status = status
             print(f"    Atualizando peer {peer.ip}:{peer.porta} status {peer.status}")
 
@@ -77,7 +78,7 @@ class Peer:
         self.vizinhos_hash[ip, porta] = vizinho
 
     def __atualiza_ou_adiciona_vizinho(self, ip, porta, status, relogio, modo=None):
-        with self.main_lock:
+        with self.vizinhos_lock:
             if (ip, porta) in self.vizinhos_hash:
                 vizinho = self.vizinhos_hash[ip, porta]
                 if vizinho.relogio > relogio and modo == "indireto": return
@@ -168,13 +169,14 @@ class Peer:
                 with open(caminho_arquivo, modo) as arquivo:
                     arquivo.seek(offset)
                     arquivo.write(conteudo)
+                    fim_escrita = time.perf_counter()
+
                     arquivo.seek(0, 2)
                     tamanho = arquivo.tell()
-                    with self.main_lock:
+                    with self.diretorio_lock:
                         if nome_arquivo not in self.diretorio_compartilhado_set:
                             self.diretorio_compartilhado.append((nome_arquivo, tamanho))
                             self.diretorio_compartilhado_set.add(nome_arquivo)
-                fim_escrita = time.perf_counter()
 
                 with self.tempo_escrita_lock:
                     self.tempo_total_escrita += (fim_escrita - inicio_escrita)
@@ -201,7 +203,7 @@ class Peer:
 
                     while True:
                         try:
-                            resposta = socket_cliente.recv(1024).decode()
+                            resposta = socket_cliente.recv(4096).decode()
                             if not resposta: break
                             conteudo += resposta
                         except socket.timeout:
@@ -238,7 +240,7 @@ class Peer:
         elif tipo_mensagem == "GET_PEERS":
             self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
 
-            with self.main_lock:
+            with self.vizinhos_lock:
                 vizinhos_copy = list(self.vizinhos)
 
             resposta = f"PEER_LIST {len(vizinhos_copy) - 1}"
@@ -246,16 +248,15 @@ class Peer:
                 if vizinho.ip == ip_origem and vizinho.porta == porta_origem:
                     continue
 
-                with self.main_lock:
-                    status_v = vizinho.status
-                    relogio_v = vizinho.relogio
+                status_v = vizinho.status
+                relogio_v = vizinho.relogio
                 resposta += f" {vizinho.ip}:{vizinho.porta}:{status_v}:{relogio_v}"
 
             self.__manda_resposta(conexao, ip_origem, porta_origem, resposta)
         elif tipo_mensagem == "LS":
             self.__atualiza_ou_adiciona_vizinho(ip_origem, porta_origem, "ONLINE", relogio)
 
-            with self.main_lock:
+            with self.diretorio_lock:
                 diretorio_copy = list(self.diretorio_compartilhado)
 
             resposta = f"LS_LIST {len(diretorio_copy)}"
@@ -305,7 +306,7 @@ class Peer:
         print('''Lista de peers:
         [0] voltar para o menu anterior''')
 
-        with self.main_lock:
+        with self.vizinhos_lock:
             vizinhos_copy = list(self.vizinhos)
 
         for i, vizinho in enumerate(vizinhos_copy):
@@ -324,7 +325,7 @@ class Peer:
         if comando == 0 or comando > tamanho:
             return
 
-        vizinho = self.vizinhos[comando - 1]
+        vizinho = vizinhos_copy[comando - 1]
 
         if (self.__manda_mensagem(vizinho.ip, vizinho.porta, "HELLO")):
             self.__atualiza_status(vizinho, "ONLINE")
@@ -334,7 +335,7 @@ class Peer:
         print()
 
     def obter_peers(self):
-        with self.main_lock:
+        with self.vizinhos_lock:
             vizinhos_copy = list(self.vizinhos)
 
         for vizinho in vizinhos_copy:
@@ -344,7 +345,7 @@ class Peer:
         print()
 
     def lista_arquivos_locais(self):
-        with self.main_lock:
+        with self.diretorio_lock:
             diretorio_copy = list(self.diretorio_compartilhado)
 
         if not diretorio_copy:
@@ -363,7 +364,7 @@ class Peer:
 
         self.tempo_total_escrita = 0.0
 
-        with self.main_lock:
+        with self.vizinhos_lock:
             vizinhos_online = [v for v in self.vizinhos if v.status == "ONLINE"]
 
         for vizinho in vizinhos_online:
@@ -405,29 +406,34 @@ class Peer:
         numero_destinos = len(destinos)
 
         numero_chunks = math.ceil(tamanho / self.tamanho_chunk)
-        indice_chunk = 0
+
+        chunks_por_peer = []
+        for i in range(numero_destinos):
+            chunks_por_peer.append([])
+
+        for chunk_idx in range(numero_chunks):
+            peer_idx = chunk_idx % numero_destinos
+            chunks_por_peer[peer_idx].append(chunk_idx)
+
         inicio = time.perf_counter()
-        while indice_chunk < numero_chunks:
-            thread_mensagens = []
+        threads = []
 
-            for _ in range(numero_destinos):
-                if indice_chunk >= numero_chunks:
-                    break
+        for peer_idx, chunks in enumerate(chunks_por_peer):
+            if not chunks:
+                continue
 
-                ip_destino, porta_destino = destinos[indice_chunk % numero_destinos].split(":")
-                porta_destino = int(porta_destino)
+            ip_destino, porta_destino = destinos[peer_idx].split(":")
+            porta_destino = int(porta_destino)
 
-                thread_mensagem = threading.Thread(
-                    target=self.__manda_mensagem,
-                    args=(ip_destino, porta_destino, f"DL {arquivo_escolhido} {self.tamanho_chunk} {indice_chunk}"),
+            thread = threading.Thread(
+                    target=self.__baixa_chunks_sequencial,
+                    args=(ip_destino, porta_destino, arquivo_escolhido, chunks)
                 )
-                thread_mensagens.append(thread_mensagem)
-                thread_mensagem.start()
+            threads.append(thread)
+            thread.start()
 
-                indice_chunk += 1
-
-            for thread_mensagem in thread_mensagens:
-                thread_mensagem.join()
+        for thread in threads:
+            thread.join()
 
         fim = time.perf_counter()
 
@@ -440,8 +446,11 @@ class Peer:
             self.estatisticas[(self.tamanho_chunk, numero_destinos, tamanho)].append(tempo_sem_escrita)
 
         print(f"\nDownload do arquivo {arquivo_escolhido} finalizado.")
-
         print()
+
+    def __baixa_chunks_sequencial(self, ip_destino, porta_destino, arquivo_escolhido, chunks):
+        for chunk_idx in chunks:
+            self.__manda_mensagem(ip_destino, porta_destino, f"DL {arquivo_escolhido} {self.tamanho_chunk} {chunk_idx}")
 
     def exibir_estatisticas(self):
         if not self.estatisticas:
@@ -476,7 +485,7 @@ class Peer:
     def sair(self):
         print("Saindo...")
 
-        with self.main_lock:
+        with self.vizinhos_lock:
             vizinhos_online = [v for v in self.vizinhos if v.status == "ONLINE"]
 
         for vizinho in vizinhos_online:
